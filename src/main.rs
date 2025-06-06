@@ -4,6 +4,7 @@ mod conf;
 use chrono::NaiveDateTime;
 use price::calc_price;
 use tracing::{event, instrument};
+use tracing_subscriber::{EnvFilter, Layer};
 use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_subscriber::fmt::time::ChronoLocal;
 
@@ -12,6 +13,11 @@ fn main() {
     // 打开日志文件
     let file_appender = tracing_appender::rolling::daily("logs", "app.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // 设置日志过滤器
+    let console_filter = EnvFilter::new("info");
+    let file_filter = EnvFilter::new("trace");
+
     // 设置控制台日志格式
     let console_layer = tracing_subscriber::fmt::layer()
         .with_writer(std::io::stderr)
@@ -19,7 +25,8 @@ fn main() {
         .with_ansi(true)
         .with_level(true)
         .with_target(false)
-        .with_thread_names(true);
+        .with_thread_names(true)
+        .with_filter(console_filter);
 
     // 设置文件日志格式
     let file_layer = tracing_subscriber::fmt::layer()
@@ -30,7 +37,8 @@ fn main() {
         .with_level(true)
         .with_target(true)
         .with_thread_ids(true)
-        .with_thread_names(true);
+        .with_thread_names(true)
+        .with_filter(file_filter);
 
     // 初始化日志订阅者
     tracing_subscriber::registry()
