@@ -142,7 +142,7 @@ async fn work() {
             _complete = wait_opt_ticker(&mut complete_tiker) => {
                 try_complete_charge(&mut ws_sender, &mut update_tiker, &mut complete_tiker).await;
             }
-            _break = wait_for_p_key() => {
+            _break = wait_for_p_key(), if CONF.charge.allow_break => {
                 try_breakdown_charge(&mut ws_sender, &mut update_tiker, &mut complete_tiker).await;
                 // 等待 10 秒
                 tokio::time::sleep(Duration::from_secs(10)).await;
