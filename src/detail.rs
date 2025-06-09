@@ -54,6 +54,7 @@ impl ChargingDetail {
             && self.status == ChargeStatus::Waiting;
     }
 
+    /// 启动充电详单
     pub fn start(&mut self, time: DateTime<Utc>) {
         if self.status != ChargeStatus::Waiting {
             tracing::error!("无法在非等待状态下开始充电详单");
@@ -64,6 +65,7 @@ impl ChargingDetail {
         self.status = ChargeStatus::Charging;
     }
 
+    /// 更新充电详单状态
     pub fn update_state(&mut self, charge_cost: f64, service_fee: f64, total_cost: f64, time: DateTime<Utc>) {
         if self.status != ChargeStatus::Charging {
             tracing::error!("无法在非充电状态下更新充电详单");
@@ -75,6 +77,7 @@ impl ChargingDetail {
         self.total_cost = total_cost;
     }
 
+    /// 完成充电详单
     pub fn complete(&mut self, charge_coost: f64, service_fee: f64, total_cost: f64, time: DateTime<Utc>) {
         if self.status != ChargeStatus::Charging {
             tracing::error!("无法在非充电状态下完成充电详单");
@@ -88,6 +91,7 @@ impl ChargingDetail {
         self.status = ChargeStatus::Completed;
     }
 
+    /// 中断充电详单
     pub fn interrupt(&mut self, charge_coost: f64, service_fee: f64, total_cost: f64, time: DateTime<Utc>) {
         if self.status != ChargeStatus::Charging || self.status != ChargeStatus::Waiting {
             tracing::error!("无法在除充电或等待外状态下中断充电详单");
@@ -100,6 +104,7 @@ impl ChargingDetail {
         self.status = ChargeStatus::Interrupted;
     }
 
+    /// 获取充电详单的起始时间
     pub fn clone_start_time(&self) -> DateTime<Utc> {
         if self.status == ChargeStatus::Waiting{
             tracing::error!("无法在等待状态下获取充电开始时间");
@@ -108,6 +113,7 @@ impl ChargingDetail {
         self.start_time.clone().unwrap()
     }
 
+    /// 获取充电详单的ID
     pub fn get_id(&self) -> u32 {
         self.id
     }

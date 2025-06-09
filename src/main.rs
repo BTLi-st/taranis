@@ -65,17 +65,20 @@ async fn main() {
         .with(console_layer)
         .with(file_layer)
         .init();
+
     work().await;
 }
 
 #[instrument]
+/// 主工作函数，负责初始化充电桩，连接 WebSocket 服务器，并处理消息。
 async fn work() {
     // 初始化充电桩
     tracing::info!("充电桩服务启动");
+    let _conf = CONF.clone();
     tracing::debug!("充电桩配置: {:?}", *CONF);
     // 检测是否允许充电桩被打断
     if CONF.charge.allow_break {
-        tracing::info!("充电桩允许被打断\n按 'p' 键可以模拟充电桩损坏");
+        tracing::info!("充电桩允许被打断, 按 'p' 键可以模拟充电桩损坏");
     } else {
         tracing::info!("充电桩不允许被打断");
     }
@@ -149,6 +152,7 @@ async fn work() {
     }
 }
 
+/// 等待一个可选的计时器，如果计时器存在，则等待其 tick，否则等待直到有新的事件发生。
 async fn wait_opt_ticker(ticker: &mut Option<Interval>) {
     if let Some(t) = ticker {
         t.tick().await;
@@ -157,14 +161,17 @@ async fn wait_opt_ticker(ticker: &mut Option<Interval>) {
     }
 }
 
+/// 设置计时器
 fn set_ticker(ticker: &mut Option<Interval>, duration: Duration) {
     *ticker = Some(interval(duration));
 }
 
+/// 移除计时器
 fn remove_ticker(ticker: &mut Option<Interval>) {
     *ticker = None;
 }
 
+/// 等待 'p' 键被按下，如果允许充电桩被打断，则模拟充电桩损坏。
 async fn wait_for_p_key() {
     if CONF.charge.allow_break {
         task::spawn_blocking(|| {
@@ -187,6 +194,7 @@ async fn wait_for_p_key() {
     }
 }
 
+/// 注册充电桩到 WebSocket 服务器
 async fn register(ws_sender: &mut WsSender) {
     let reg_msg = MSG {
         type_: MessageType::Register,
@@ -203,6 +211,7 @@ async fn register(ws_sender: &mut WsSender) {
     }
 }
 
+/// 处理接收到的消息
 async fn handle(
     message: String,
     ws_sender: &mut WsSender,
@@ -257,6 +266,7 @@ async fn handle(
     }
 }
 
+/// 检查充电桩是否未工作，如果未工作且队列中有充电详单，则开始工作并设置计时器。
 async fn not_working_check(charge: &mut Charge, complete_ticker: &mut Option<Interval>) -> bool {
     if !charge.is_working() && charge.get_queue_size() > 0 {
         tracing::info!("充电桩未工作，开始工作");
@@ -271,6 +281,7 @@ async fn not_working_check(charge: &mut Charge, complete_ticker: &mut Option<Int
     }
 }
 
+/// 发送充电详单更新消息
 async fn send_update(ws_sender: &mut WsSender, detail: &detail::ChargingDetail) {
     let update_msg = MSG {
         type_: MessageType::Update,
@@ -287,6 +298,7 @@ async fn send_update(ws_sender: &mut WsSender, detail: &detail::ChargingDetail) 
     }
 }
 
+/// 发送充电详单完成消息
 async fn send_complete(
     ws_sender: &mut WsSender,
     detail: &detail::ChargingDetail,
@@ -306,6 +318,7 @@ async fn send_complete(
     }
 }
 
+/// 发送充电详单故障消息
 async fn send_fault(
     ws_sender: &mut WsSender,
     detail: &detail::ChargingDetail,
@@ -325,6 +338,7 @@ async fn send_fault(
     }
 }
 
+/// 处理新的充电详单消息
 async fn handle_new(
     msg: String,
     ws_sender: &mut WsSender,
@@ -360,6 +374,7 @@ async fn handle_new(
     }
 }
 
+/// 处理取消充电详单消息
 async fn handle_cancel(
     msg: String,
     ws_sender: &mut WsSender,
@@ -395,6 +410,7 @@ async fn handle_cancel(
     }
 }
 
+/// 处理关闭充电桩请求
 async fn handle_close(
     ws_sender: &mut WsSender,
     update_ticker: &mut Option<Interval>,
@@ -412,12 +428,14 @@ async fn handle_close(
     remove_ticker(complete_ticker);
 }
 
+/// 处理打开充电桩请求
 async fn handle_open(update_ticker: &mut Option<Interval>, complete_ticker: &mut Option<Interval>) {
     tracing::info!("接收到打开充电桩请求");
     remove_ticker(update_ticker);
     remove_ticker(complete_ticker);
 }
 
+/// 尝试更新充电状态
 async fn try_update_charge(ws_sender: &mut WsSender, update_ticker: &mut Option<Interval>) {
     let mut charge = CHARGE.write().await;
     if charge.is_working() {
@@ -439,6 +457,7 @@ async fn try_update_charge(ws_sender: &mut WsSender, update_ticker: &mut Option<
     }
 }
 
+/// 尝试完成充电
 async fn try_complete_charge(
     ws_sender: &mut WsSender,
     update_ticker: &mut Option<Interval>,
@@ -469,6 +488,7 @@ async fn try_complete_charge(
     }
 }
 
+/// 尝试打断充电
 async fn try_breakdown_charge(
     ws_sender: &mut WsSender,
     update_ticker: &mut Option<Interval>,

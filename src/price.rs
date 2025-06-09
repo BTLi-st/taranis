@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::conf::CONF;
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
+/// 时间段结构体
 struct TimePeriod {
     start: NaiveTime,
     end: NaiveTime,
@@ -13,11 +14,15 @@ struct TimePeriod {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+/// 价格表结构体
 pub struct Prices {
+    /// 时间段列表
     periods: Vec<TimePeriod>,
+    /// 服务费
     service_fee: f64,
     #[serde(default = "not_optimized", skip)]
-    is_optimized: bool, // 是否经过优化
+    /// 是否经过优化
+    is_optimized: bool,
 }
 
 fn not_optimized() -> bool {
@@ -26,6 +31,7 @@ fn not_optimized() -> bool {
 
 impl Prices {
     #[allow(unused)]
+    /// 创建一个新的价格表
     pub fn new() -> Self {
         Prices {
             periods: Vec::new(),
@@ -142,8 +148,10 @@ impl Prices {
     }
 }
 
+/// 0 点时间常量
 static MIDNIGHT: NaiveTime = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
 
+/// 默认价格表
 static DEFAULT_PRICES: LazyLock<Prices> = LazyLock::new(|| {
     Prices {
         periods: vec![
@@ -201,12 +209,14 @@ impl Default for Prices {
     }
 }
 
+/// 计算从指定时间到午夜的小时数
 fn hours_to_midnight(time: NaiveTime) -> f64 {
     let midnight = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
     let duration = midnight.signed_duration_since(time); // 计算从指定时间到午夜的持续时间
     24.0 + duration.num_seconds() as f64 / 3600.0 // 转换为小时
 }
 
+/// 将浮点数四舍五入到指定的小数位数
 fn round_to_precision(value: f64, decimal_places: u32) -> f64 {
     let multiplier = 10.0_f64.powi(decimal_places as i32);
     (value * multiplier).round() / multiplier
@@ -249,6 +259,7 @@ impl Prices {
         Ok((charge_amount, service_fee))
     }
 
+    /// 计算从指定时间到午夜的价格
     fn calc_day_price_until_midnight(
         &self,
         start: NaiveTime,
@@ -281,6 +292,8 @@ impl Prices {
         Ok((charge_amount, service_fee))
     }
 
+    /// 计算指定时间段的价格
+    /// 如果时间段跨越多天，会自动处理每一天的价格
     pub fn calc_price(
         &self,
         start: NaiveDateTime,
@@ -319,6 +332,7 @@ impl Prices {
     }
 }
 
+/// 静态加载价格表
 static PRICESS: LazyLock<Prices> = LazyLock::new(|| {
     let path = &CONF.price.path;
     match std::fs::read_to_string(path) {

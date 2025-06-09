@@ -7,19 +7,27 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
+/// 充电桩结构体
 pub struct Charge {
-    charge_id: Uuid, // 充电桩ID（UUID）
+    /// 充电桩ID
+    charge_id: Uuid,
     #[serde(rename = "type")]
+    /// 充电类型
     type_: ChargeType,
-    power: f64, // 充电功率
-    size: u32,  // 队列大小
+    /// 充电功率，单位为kW
+    power: f64,
+    /// 队列大小
+    size: u32,
     #[serde(skip)]
-    queue: Vec<ChargingDetail>, // 充电详单队列
+    /// 充电详单队列
+    queue: Vec<ChargingDetail>,
     #[serde(skip)]
-    working: bool, // 是否正在工作
+    /// 是否正在工作
+    working: bool,
 }
 
 impl Charge {
+    /// 创建一个新的充电桩实例
     pub fn new(type_: ChargeType, power: f64, size: u32) -> Self {
         Charge {
             charge_id: Uuid::new_v4(),
@@ -31,6 +39,7 @@ impl Charge {
         }
     }
 
+    /// 添加充电详单到充电桩队列
     pub fn add_detail(&mut self, detail: ChargingDetail) {
         if self.queue.len() < self.size as usize {
             self.queue.push(detail);
@@ -39,6 +48,7 @@ impl Charge {
         }
     }
 
+    /// 开始充电
     pub fn start_charging(&mut self) {
         if self.queue.is_empty() {
             tracing::warn!("充电桩队列为空，无法开始充电");
@@ -56,6 +66,7 @@ impl Charge {
         detail.start(chrono::Utc::now());
     }
 
+    /// 更新充电状态
     pub fn update_charging(&mut self) {
         if self.queue.is_empty() {
             tracing::warn!("充电桩队列为空，无法更新充电状态");
@@ -72,6 +83,7 @@ impl Charge {
         detail.update_state(cost.0, cost.1, cost.0 + cost.1, now.clone());
     }
 
+    /// 完成充电
     pub fn complete_charging(&mut self) -> Option<ChargingDetail> {
         // 检查队列是否为空或充电桩是否处于工作状态
         // 如果队列为空或充电桩未工作，返回 None
@@ -92,6 +104,7 @@ impl Charge {
         }
     }
 
+    /// 取消充电
     pub fn cancel_charging(&mut self, detail_id: u32) -> Result<ChargingDetail, String> {
         if let Some(pos) = self.queue.iter().position(|d| d.get_id() == detail_id) {
             let detail = self.queue.get_mut(pos).unwrap();
@@ -111,10 +124,12 @@ impl Charge {
         }
     }
 
+    /// 获取正在充电的充电详单的引用
     pub fn get_charging_detail_ref(&self) -> Option<&ChargingDetail> {
         self.queue.first()
     }
 
+    /// 关闭充电桩
     pub fn close(&mut self) -> Option<ChargingDetail> {
         self.working = false; // 设置充电桩为非工作状态
         if self.queue.is_empty() {
@@ -131,18 +146,22 @@ impl Charge {
         }
     }
 
+    /// 损坏充电桩
     pub fn breakdown(&mut self) -> Option<ChargingDetail> {
         self.close() // 关闭充电桩并清空队列
     }
 
+    /// 是否正在工作
     pub fn is_working(&self) -> bool {
         self.working
     }
 
+    /// 获取队列大小
     pub fn get_queue_size(&self) -> usize {
         self.queue.len()
     }
 
+    /// 获取预计完成间隔
     pub fn complete_interval(&self) -> u64 {
         if self.queue.is_empty() {
             tracing::warn!("充电桩队列为空，无法获取完成间隔");
@@ -168,6 +187,7 @@ impl Charge {
     }
 }
 
+/// 全局充电桩实例，使用 Lazy 和 RwLock 确保线程安全和延迟加载
 pub static CHARGE: Lazy<RwLock<Charge>> = Lazy::new(|| {
     RwLock::new(Charge::new(
         CONF.charge.charge_type,
