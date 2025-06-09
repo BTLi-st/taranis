@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use chrono::{NaiveDateTime, NaiveTime};
+use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::conf::CONF;
@@ -190,7 +190,7 @@ static DEFAULT_PRICES: LazyLock<Prices> = LazyLock::new(|| {
                 price: 0.4,
             },
         ],
-        service_fee: 0.8,    // 默认服务费为 0.8
+        service_fee: 0.8,   // 默认服务费为 0.8
         is_optimized: true, // 默认已优化
     }
 });
@@ -215,60 +215,70 @@ fn round_to_precision(value: f64, decimal_places: u32) -> f64 {
 impl Prices {
     /// 计算指定时间段的价格
     /// 时间段结尾不能是 0 点
-    fn calc_day_price(&self, start: NaiveTime, end: NaiveTime, power: f64) -> Result<f64, String> {
+    fn calc_day_price(
+        &self,
+        start: NaiveTime,
+        end: NaiveTime,
+        power: f64,
+    ) -> Result<(f64, f64), String> {
         if !self.is_optimized {
             return Err("Prices have not been optimized, cannot calculate day price".to_string());
         }
         if start >= end {
             return Err("Start time must be before end time".to_string());
         }
-        let mut total_price = 0.0;
+        let mut charge_amount = 0.0;
+        let mut service_fee = 0.0;
         for period in &self.periods[..self.periods.len() - 1] {
             if period.start < end && period.end > start {
                 // 计算重叠时间段的价格
                 let overlap_start = start.max(period.start);
                 let overlap_end = end.min(period.end);
                 let duration = (overlap_end - overlap_start).num_seconds() as f64 / 3600.0; // 转换为小时
-                total_price += duration * period.price * power;
-                total_price += self.service_fee * power * duration; // 添加服务费
+                charge_amount += duration * period.price * power;
+                service_fee += self.service_fee * power * duration; // 添加服务费
             }
         }
         // 特判最后一段到 0 点的时间段
         if end > self.periods.last().unwrap().start {
             let overlap_start = start.max(self.periods.last().unwrap().start);
             let duration = (end - overlap_start).num_seconds() as f64 / 3600.0; // 转换为小时
-            total_price += duration * self.periods.last().unwrap().price * power;
-            total_price += self.service_fee * power * duration; // 添加服务费
+            charge_amount += duration * self.periods.last().unwrap().price * power;
+            service_fee += self.service_fee * power * duration; // 添加服务费
         }
-        Ok(total_price)
+        Ok((charge_amount, service_fee))
     }
 
     fn calc_day_price_until_midnight(
         &self,
         start: NaiveTime,
         power: f64,
-    ) -> Result<f64, String> {
+    ) -> Result<(f64, f64), String> {
         if !self.is_optimized {
-            return Err("Prices have not been optimized, cannot calculate day price until midnight".to_string());
+            return Err(
+                "Prices have not been optimized, cannot calculate day price until midnight"
+                    .to_string(),
+            );
         }
-        let mut total_price = 0.0;
+        let mut charge_amount = 0.0;
+        let mut service_fee = 0.0;
         for period in &self.periods[..self.periods.len() - 1] {
             if period.end > start {
                 // 计算重叠时间段的价格
                 let overlap_start = start.max(period.start);
                 let duration = (period.end - overlap_start).num_seconds() as f64 / 3600.0; // 转换为小时
-                total_price += duration * period.price * power;
-                total_price += self.service_fee * power * duration; // 添加服务费
+                charge_amount += duration * period.price * power;
+                service_fee += self.service_fee * power * duration; // 添加服务费
             }
         }
 
         // 特判最后一段到 0 点的时间段
         let overlap_start = start.max(self.periods.last().unwrap().start);
         let duration = hours_to_midnight(overlap_start);
-        total_price += duration * self.periods.last().unwrap().price * power;
-        total_price += self.service_fee * power * duration; // 添加服务费
+        charge_amount += duration * self.periods.last().unwrap().price * power;
+        service_fee += self.service_fee * power * duration; // 添加服务费
 
-        Ok(total_price)
+        Ok((charge_amount, service_fee))
     }
 
     pub fn calc_price(
@@ -276,7 +286,7 @@ impl Prices {
         start: NaiveDateTime,
         end: NaiveDateTime,
         power: f64,
-    ) -> Result<f64, String> {
+    ) -> Result<(f64, f64), String> {
         if !self.is_optimized {
             return Err("Prices not have been optimized, cannot calculate price".to_string());
         }
@@ -286,18 +296,26 @@ impl Prices {
         let mut start_time = start.time();
         let end_time = end.time();
         let mut date = start.date();
-        let mut total_price = 0.0;
+        let mut charge_amount = 0.0;
+        let mut service_fee = 0.0;
         while date < end.date() {
-            total_price += self.calc_day_price_until_midnight(start_time, power)?;
+            let (amount, fee) = self.calc_day_price_until_midnight(start_time, power)?;
+            charge_amount += amount;
+            service_fee += fee;
             date = date.succ_opt().unwrap(); // 前进到下一天
             start_time = MIDNIGHT; // 重置开始时间为午夜
         }
         // 处理最后一天的时间段
         if end_time != MIDNIGHT {
-            total_price += self.calc_day_price(start_time, end_time, power)?;
+            let (amount, fee) = self.calc_day_price(start_time, end_time, power)?;
+            charge_amount += amount;
+            service_fee += fee;
         }
 
-        Ok(round_to_precision(total_price, 2))
+        Ok((
+            round_to_precision(charge_amount, 2),
+            round_to_precision(service_fee, 2),
+        ))
     }
 }
 
@@ -340,8 +358,26 @@ static PRICESS: LazyLock<Prices> = LazyLock::new(|| {
     }
 });
 
-pub fn calc_price(start: NaiveDateTime, end: NaiveDateTime, power: f64) -> Result<f64, String> {
+/// 计算指定时间段的价格
+/// 使用设置的价格表
+pub fn calc_price(
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+    power: f64,
+) -> Result<(f64, f64), String> {
     PRICESS.calc_price(start, end, power)
+}
+
+/// 计算指定时间段的价格
+/// 使用设置的价格表和时区
+pub fn calc_price_with_tz(
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    power: f64,
+) -> Result<(f64, f64), String> {
+    let start_naive = start.with_timezone(&CONF.charge.tz);
+    let end_naive = end.with_timezone(&CONF.charge.tz);
+    calc_price(start_naive.naive_local(), end_naive.naive_local(), power)
 }
 
 #[cfg(test)]
@@ -434,19 +470,23 @@ mod tests {
             NaiveDateTime::parse_from_str("2023-10-01 20:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let power = 1.0; // 假设功率为 1.0
         let result = prices.calc_price(start, end, power).unwrap();
-        println!("Calculated price: {}", result);
-        assert_eq!(result, 20.1);
+        println!("Calculated price: {}", result.0 + result.1);
+        assert_eq!(result.0 + result.1, 20.1);
         let start =
             NaiveDateTime::parse_from_str("2023-10-01 08:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let end =
             NaiveDateTime::parse_from_str("2023-10-03 08:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let result1 = prices.calc_price(start, end, power).unwrap();
-        println!("Calculated price for two days: {}", result1);
+        println!("Calculated price for two days: {}", result1.0 + result1.1);
         let start =
             NaiveDateTime::parse_from_str("2023-10-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let end =
             NaiveDateTime::parse_from_str("2023-10-03 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let result2 = prices.calc_price(start, end, power).unwrap();
-        println!("Calculated price for two days with midnight: {}", result2);
+        println!(
+            "Calculated price for two days with midnight: {}",
+            result2.0 + result2.1
+        );
+        assert_eq!(result1, result2);
     }
 }
