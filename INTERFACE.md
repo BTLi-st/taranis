@@ -10,11 +10,12 @@
 {
   "id": 123, // 详单 ID
   "request_amount": 100, // 请求充电量
+  "type":"F", //充电桩类型，用T/F表示
   "already_charged": 50, // 已充电量（没有充电时为 0）
   "start_time": "2023-10-01T12:00:00Z", // 充电开始时间（没有充电时为 空）
   "last_update_time": "2023-10-01T12:15:00Z", // 最后更新时间（没有充电时为 空）
   "end_time": "2023-10-01T12:30:00Z", // 充电结束时间（没有充电时为 空）
-  "charge_cost": 10.5, // 充电费用（没有充电时为 0）
+  "chaege_cost": 10.5, // 充电费用（没有充电时为 0）
   "service_fee": 2.0, // 服务费（没有充电时为 0）
   "total_cost": 12.5, // 总费用（没有充电时为 0）
   "status": "charging", // 充电状态（waiting, charging, completed, interrupted) (等待中, 充电中, 已完成, 中断)
