@@ -72,3 +72,25 @@ url = "ws://localhost:8080/ws" # WebSocket 服务器地址
   "service_fee": 0.8
 }
 ```
+
+## 如何运行
+
+### 主程序
+
+可以使用以下命令运行程序：
+
+```bash
+cargo run --release --bin taranis
+```
+
+如果已经编译了程序，可以直接运行生成的可执行文件：
+
+### 测试程序
+
+可以使用以下命令运行测试程序：
+
+```bash
+cargo run --release --bin test
+```
+
+该测试程序作为测试服务器，会模拟充电桩的 WebSocket 服务器，提供充电桩状态更新和充电请求处理。
