@@ -217,7 +217,7 @@ fn hours_to_midnight(time: NaiveTime) -> f64 {
 }
 
 /// 将浮点数四舍五入到指定的小数位数
-fn round_to_precision(value: f64, decimal_places: u32) -> f64 {
+pub fn round_to_precision(value: f64, decimal_places: u32) -> f64 {
     let multiplier = 10.0_f64.powi(decimal_places as i32);
     (value * multiplier).round() / multiplier
 }

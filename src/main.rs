@@ -1,14 +1,10 @@
-mod charge;
-mod conf;
-mod detail;
-mod message;
-mod price;
-
 use futures_util::SinkExt;
-use futures_util::stream::SplitSink;
 use futures_util::StreamExt;
+use futures_util::stream::SplitSink;
 use tokio::net::TcpStream;
+use tokio::sync::oneshot;
 use tokio::time::Interval;
+use tracing::Instrument;
 use tracing::instrument;
 use tracing_subscriber::fmt::time::ChronoLocal;
 use tracing_subscriber::{EnvFilter, Layer};
@@ -17,16 +13,20 @@ use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::Subsc
 use crossterm::event::{self, Event, KeyCode};
 use tokio::task;
 
-use tokio::time::{Duration, interval, timeout};
+use tokio::time::{Duration, interval, interval_at, timeout};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::charge::CHARGE;
-use crate::charge::Charge;
-use crate::conf::CONF;
-use crate::message::{MSG, MessageType};
+use taranis::charge::CHARGE;
+use taranis::charge::Charge;
+use taranis::conf::CONF;
+use taranis::detail::ChargingDetail;
+use taranis::message::{MSG, MessageType};
 
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 type WsSender = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, WsMessage>;
+
+/// 结束全局原子变量
+static IS_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[tokio::main]
 async fn main() {
@@ -36,7 +36,11 @@ async fn main() {
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     // 设置日志过滤器
-    let console_filter = EnvFilter::new("info");
+    let console_filter = if cfg!(debug_assertions) {
+        EnvFilter::new("debug")
+    } else {
+        EnvFilter::new("info")
+    };
     let file_filter = EnvFilter::new("trace");
 
     // 设置控制台日志格式
@@ -46,7 +50,6 @@ async fn main() {
         .with_ansi(true)
         .with_level(true)
         .with_target(false)
-        .with_thread_names(true)
         .with_filter(console_filter);
 
     // 设置文件日志格式
@@ -67,6 +70,8 @@ async fn main() {
         .with(file_layer)
         .init();
 
+    tracing::info!("程序 PID: {}", pid);
+
     work().await;
 }
 
@@ -77,9 +82,12 @@ async fn work() {
     tracing::info!("充电桩服务启动");
     let _conf = &*CONF;
     tracing::debug!("充电桩配置: {:?}", *CONF);
+    // 打断通道
+    let (breakdown_tx, mut breakdown_rx) = oneshot::channel::<()>();
     // 检测是否允许充电桩被打断
     if CONF.charge.allow_break {
         tracing::info!("充电桩允许被打断, 按 'p' 键可以模拟充电桩损坏");
+        wait_for_p_key(breakdown_tx).await;
     } else {
         tracing::info!("充电桩不允许被打断");
     }
@@ -93,10 +101,12 @@ async fn work() {
         Ok(Ok(val)) => val,
         Ok(Err(e)) => {
             tracing::error!("WebSocket 连接失败: {}", e);
+            IS_CLOSED.store(true, std::sync::atomic::Ordering::Release);
             return;
         }
         Err(_) => {
             tracing::error!("WebSocket 连接超时");
+            IS_CLOSED.store(true, std::sync::atomic::Ordering::Release);
             return;
         }
     };
@@ -143,14 +153,24 @@ async fn work() {
             _complete = wait_opt_ticker(&mut complete_tiker) => {
                 try_complete_charge(&mut ws_sender, &mut update_tiker, &mut complete_tiker).await;
             }
-            _break = wait_for_p_key(), if CONF.charge.allow_break => {
-                try_breakdown_charge(&mut ws_sender, &mut update_tiker, &mut complete_tiker).await;
-                // 等待 10 秒
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                break;
+            _break = &mut breakdown_rx => {
+                match _break {
+                    Ok(_) => {
+                        tracing::info!("接收到充电桩损坏信号");
+                        try_breakdown_charge(&mut ws_sender, &mut update_tiker, &mut complete_tiker).await;
+                        ws_sender.close().await.ok();
+                        break;
+                    }
+                    Err(_) => {
+                        tracing::warn!("充电桩损坏信号已被取消");
+                        break;
+                    }
+                }
             }
         }
     }
+    tracing::info!("充电桩服务已停止");
+    IS_CLOSED.store(true, std::sync::atomic::Ordering::Release);
 }
 
 /// 等待一个可选的计时器，如果计时器存在，则等待其 tick，否则等待直到有新的事件发生。
@@ -164,7 +184,19 @@ async fn wait_opt_ticker(ticker: &mut Option<Interval>) {
 
 /// 设置计时器
 fn set_ticker(ticker: &mut Option<Interval>, duration: Duration) {
-    *ticker = Some(interval(duration));
+    if duration.is_zero() {
+        tracing::warn!(
+            "设置的计时器时长为零，将使用 tokio::time::interval (可能立即触发): {:?}",
+            duration
+        );
+        // 对于零时长，如果期望立即触发，原始的 interval() 行为是符合的
+        *ticker = Some(interval(duration));
+    } else {
+        // 计算第一个 tick 应该发生的时间
+        tracing::debug!("设置计时器，间隔: {:?}", duration);
+        let first_tick_time = tokio::time::Instant::now() + duration;
+        *ticker = Some(interval_at(first_tick_time, duration));
+    }
 }
 
 /// 移除计时器
@@ -173,28 +205,25 @@ fn remove_ticker(ticker: &mut Option<Interval>) {
 }
 
 /// 等待 'p' 键被按下，如果允许充电桩被打断，则模拟充电桩损坏。
-async fn wait_for_p_key() {
-    if CONF.charge.allow_break {
-        task::spawn_blocking(|| {
-            loop {
-                if event::poll(std::time::Duration::from_millis(100)).unwrap() {
-                    if let Event::Key(key_event) = event::read().unwrap() {
-                        if key_event.code == KeyCode::Char('p')
-                            || key_event.code == KeyCode::Char('P')
-                        {
-                            break;
-                        }
+async fn wait_for_p_key(tx: oneshot::Sender<()>) {
+    let _ = task::spawn_blocking(move || {
+        loop {
+            if event::poll(Duration::from_millis(100)).unwrap() {
+                if let Event::Key(key_event) = event::read().unwrap() {
+                    if key_event.code == KeyCode::Char('p') || key_event.code == KeyCode::Char('P')
+                    {
+                        tracing::info!("检测到 'p' 键被按下，模拟充电桩损坏");
+                        let _ = tx.send(()); // 发送打断信号
+                        break;
                     }
                 }
+            } else if IS_CLOSED.load(std::sync::atomic::Ordering::Acquire) {
+                break;
             }
-        })
-        .await
-        .unwrap();
-    } else {
-        futures_util::future::pending::<()>().await;
-    }
+        }
+    })
+    .instrument(tracing::info_span!("等待 'p' 键被按下"));
 }
-
 /// 注册充电桩到 WebSocket 服务器
 async fn register(ws_sender: &mut WsSender) {
     let reg_msg = MSG {
@@ -272,9 +301,10 @@ async fn not_working_check(charge: &mut Charge, complete_ticker: &mut Option<Int
     if !charge.is_working() && charge.get_queue_size() > 0 {
         tracing::info!("充电桩未工作，开始工作");
         charge.start_charging();
+        // println!("{:?}", Duration::from_secs(charge.complete_interval()));
         set_ticker(
             complete_ticker,
-            Duration::from_secs(charge.complete_interval()),
+            Duration::from_secs(charge.complete_interval() + 1), // +1秒是为了避免精确到秒的误差
         );
         true
     } else {
@@ -283,7 +313,7 @@ async fn not_working_check(charge: &mut Charge, complete_ticker: &mut Option<Int
 }
 
 /// 发送充电详单更新消息
-async fn send_update(ws_sender: &mut WsSender, detail: &detail::ChargingDetail) {
+async fn send_update(ws_sender: &mut WsSender, detail: &ChargingDetail) {
     let update_msg = MSG {
         type_: MessageType::Update,
         data: serde_json::to_string(detail).unwrap(),
@@ -294,16 +324,13 @@ async fn send_update(ws_sender: &mut WsSender, detail: &detail::ChargingDetail) 
         ))
         .await
     {
-        Ok(_) => tracing::info!("充电详单更新消息发送成功"),
+        Ok(_) => tracing::debug!("充电详单更新消息发送成功: {}", detail.get_id()),
         Err(e) => tracing::error!("充电详单更新消息发送失败: {}", e),
     }
 }
 
 /// 发送充电详单完成消息
-async fn send_complete(
-    ws_sender: &mut WsSender,
-    detail: &detail::ChargingDetail,
-) {
+async fn send_complete(ws_sender: &mut WsSender, detail: &ChargingDetail) {
     let complete_msg = MSG {
         type_: MessageType::Complete,
         data: serde_json::to_string(detail).unwrap(),
@@ -320,13 +347,10 @@ async fn send_complete(
 }
 
 /// 发送充电详单故障消息
-async fn send_fault(
-    ws_sender: &mut WsSender,
-    detail: &detail::ChargingDetail,
-) {
+async fn send_fault(ws_sender: &mut WsSender, detail: Option<&ChargingDetail>) {
     let fault_msg = MSG {
         type_: MessageType::Fault,
-        data: serde_json::to_string(detail).unwrap(),
+        data: serde_json::to_string(&detail).unwrap(),
     };
     match ws_sender
         .send(WsMessage::Text(
@@ -346,7 +370,7 @@ async fn handle_new(
     update_ticker: &mut Option<Interval>,
     complete_ticker: &mut Option<Interval>,
 ) {
-    let detail: detail::ChargingDetail = match serde_json::from_str(&msg) {
+    let detail: ChargingDetail = match serde_json::from_str(&msg) {
         Ok(d) => d,
         Err(e) => {
             tracing::error!("充电详单解析失败: {}", e);
@@ -382,7 +406,7 @@ async fn handle_cancel(
     update_ticker: &mut Option<Interval>,
     complete_ticker: &mut Option<Interval>,
 ) {
-    let detail: detail::ChargingDetail = match serde_json::from_str(&msg) {
+    let detail: ChargingDetail = match serde_json::from_str(&msg) {
         Ok(d) => d,
         Err(e) => {
             tracing::error!("充电详单解析失败: {}", e);
@@ -443,10 +467,6 @@ async fn try_update_charge(ws_sender: &mut WsSender, update_ticker: &mut Option<
         charge.update_charging();
         if let Some(detail) = charge.get_charging_detail_ref() {
             send_update(ws_sender, detail).await;
-            set_ticker(
-                update_ticker,
-                Duration::from_secs(CONF.charge.update_interval),
-            );
         } else {
             unreachable!(
                 "It should never happen that there is no charging detail when the charge is working"
@@ -486,6 +506,7 @@ async fn try_complete_charge(
     } else {
         tracing::error!("充电桩未处于工作状态，无法完成充电");
         remove_ticker(complete_ticker);
+        remove_ticker(update_ticker);
     }
 }
 
@@ -499,7 +520,7 @@ async fn try_breakdown_charge(
     let mut charge = CHARGE.write().await;
     if charge.is_working() {
         if let Some(detail) = charge.breakdown() {
-            send_fault(ws_sender, &detail).await;
+            send_fault(ws_sender, Some(&detail)).await;
             remove_ticker(complete_ticker);
             remove_ticker(update_ticker);
             tracing::info!("充电详单 {} 已被打断", detail.get_id());
@@ -510,6 +531,7 @@ async fn try_breakdown_charge(
         }
     } else {
         tracing::info!("充电桩未处于工作状态，没有被打断的充电详单");
+        send_fault(ws_sender, None).await;
         remove_ticker(complete_ticker);
         remove_ticker(update_ticker);
     }

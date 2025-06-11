@@ -71,6 +71,11 @@ impl Charge {
         let detail = self.queue.first_mut().unwrap();
 
         detail.start(chrono::Utc::now());
+
+        tracing::info!(
+            "充电桩开始充电 详单 ID: {}",
+            detail.get_id(),
+        );
     }
 
     /// 更新充电状态
@@ -87,7 +92,12 @@ impl Charge {
         let detail = self.queue.first_mut().unwrap();
         let now = chrono::Utc::now();
         let cost = calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
-        detail.update_state(cost.0, cost.1, cost.0 + cost.1, now.clone());
+        detail.update_state(
+            already_charged(self.power, &detail, now.clone()),
+            cost.0,
+            cost.1,
+            now.clone(),
+        );
     }
 
     /// 完成充电
@@ -106,7 +116,12 @@ impl Charge {
             let now = chrono::Utc::now();
             let cost =
                 calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
-            detail.complete(cost.0, cost.1, cost.0 + cost.1, now.clone());
+            detail.complete(
+                already_charged(self.power, &detail, now.clone()),
+                cost.0,
+                cost.1,
+                now.clone(),
+            );
             Some(detail)
         }
     }
@@ -119,10 +134,20 @@ impl Charge {
             if pos == 0 {
                 let cost =
                     calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
-                detail.interrupt(cost.0, cost.1, cost.0 + cost.1, now.clone());
+                detail.interrupt(
+                    already_charged(self.power, &detail, now.clone()),
+                    cost.0,
+                    cost.1,
+                    now.clone(),
+                );
                 self.working = false; // 取消充电时设置充电桩为非工作状态
             } else {
-                detail.interrupt(0.0, 0.0, 0.0, now.clone());
+                detail.interrupt(
+                    already_charged(self.power, &detail, now.clone()),
+                    0.0,
+                    0.0,
+                    now.clone(),
+                );
             }
             Ok(self.queue.remove(pos))
         } else {
@@ -148,7 +173,12 @@ impl Charge {
             let now = chrono::Utc::now();
             let cost =
                 calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
-            detail.interrupt(cost.0, cost.1, cost.0 + cost.1, now.clone());
+            detail.interrupt(
+                already_charged(self.power, &detail, now.clone()),
+                cost.0,
+                cost.1,
+                now.clone(),
+            );
             Some(detail)
         }
     }
@@ -192,6 +222,17 @@ impl Charge {
             }
         }
     }
+}
+
+fn already_charged(
+    power: f64,
+    detail: &ChargingDetail,
+    time: chrono::DateTime<chrono::Utc>,
+) -> f64 {
+    let start_time = detail.clone_start_time();
+    let duration = time.signed_duration_since(start_time);
+    let hours = duration.num_seconds() as f64 / 3600.0; // 转换为小时
+    hours * power // 计算已充电度数
 }
 
 /// 全局充电桩实例，使用 Lazy 和 RwLock 确保线程安全和延迟加载
