@@ -75,7 +75,7 @@ async fn main() {
 async fn work() {
     // 初始化充电桩
     tracing::info!("充电桩服务启动");
-    let _conf = CONF.clone();
+    let _conf = &*CONF;
     tracing::debug!("充电桩配置: {:?}", *CONF);
     // 检测是否允许充电桩被打断
     if CONF.charge.allow_break {

@@ -41,7 +41,14 @@ impl Charge {
 
     /// 添加充电详单到充电桩队列
     pub fn add_detail(&mut self, detail: ChargingDetail) {
-        if self.queue.len() < self.size as usize {
+        if detail.get_type() != self.type_ {
+            tracing::warn!(
+                "充电详单类型不匹配，无法添加到充电桩队列: {:?} != {:?}",
+                detail.get_type(),
+                self.type_
+            );
+            return;
+        } else if self.queue.len() < self.size as usize {
             self.queue.push(detail);
         } else {
             tracing::warn!("充电桩队列已满，无法添加新的充电详单");

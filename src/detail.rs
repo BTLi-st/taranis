@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::conf::ChargeType;
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 enum ChargeStatus {
     #[serde(rename = "waiting")]
@@ -23,6 +25,9 @@ pub struct ChargingDetail {
     id: u32,
     /// 充电请求度数
     request_amount: f64,
+    #[serde(rename = "type")]
+    /// 充电类型
+    type_: ChargeType,
     /// 已经充电度数
     already_charged: f64,
     /// 充电开始时间
@@ -128,6 +133,11 @@ impl ChargingDetail {
         let estimated_duration = remaining_amount / power; // 假设 power 是单位时间内充电的度数
         Some(self.start_time.unwrap() + chrono::Duration::seconds((estimated_duration * 3600.0) as i64))
     }
+
+    /// 获取充电详单的类型
+    pub fn get_type(&self) -> ChargeType {
+        self.type_
+    }
 }
 
 #[cfg(test)]
@@ -139,6 +149,7 @@ mod tests {
         let details = ChargingDetail {
             id: 1,
             request_amount: 100.0,
+            type_: ChargeType::Fast,
             already_charged: 50.0,
             start_time: Some(Utc::now()),
             last_update_time: Some(Utc::now()),
