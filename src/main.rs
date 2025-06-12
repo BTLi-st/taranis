@@ -70,14 +70,13 @@ async fn main() {
         .with(file_layer)
         .init();
 
-    tracing::info!("程序 PID: {}", pid);
-
     work().await;
 }
 
 #[instrument]
 /// 主工作函数，负责初始化充电桩，连接 WebSocket 服务器，并处理消息。
 async fn work() {
+    tracing::info!("程序 PID: {}", std::process::id());
     // 初始化充电桩
     tracing::info!("充电桩服务启动");
     let _conf = &*CONF;
