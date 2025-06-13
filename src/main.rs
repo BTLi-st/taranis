@@ -227,7 +227,7 @@ async fn wait_for_p_key(tx: oneshot::Sender<()>) {
 async fn register(ws_sender: &mut WsSender) {
     let reg_msg = MSG {
         type_: MessageType::Register,
-        data: serde_json::to_string(&*CHARGE.read().await).unwrap(),
+        data: serde_json::to_string(&*CHARGE.lock().await).unwrap(),
     };
     match ws_sender
         .send(WsMessage::Text(
@@ -382,7 +382,7 @@ async fn handle_new(
         tracing::warn!("充电详单格式异常，无法加入队列");
         return;
     } else {
-        let mut charge = CHARGE.write().await;
+        let mut charge = CHARGE.lock().await;
         charge.add_detail(detail);
         tracing::info!(
             "充电详单已加入队列，当前队列长度: {}",
@@ -415,7 +415,7 @@ async fn handle_cancel(
     let detail_id = detail.get_id();
     tracing::info!("接收到取消充电详单请求: {}", detail_id);
 
-    let mut charge = CHARGE.write().await;
+    let mut charge = CHARGE.lock().await;
     match charge.cancel_charging(detail_id) {
         Ok(detail) => {
             tracing::info!("充电详单 {} 已取消", detail_id);
@@ -441,7 +441,7 @@ async fn handle_close(
     complete_ticker: &mut Option<Interval>,
 ) {
     tracing::info!("接收到关闭充电桩请求");
-    let mut charge = CHARGE.write().await;
+    let mut charge = CHARGE.lock().await;
     if let Some(detail) = charge.close() {
         tracing::info!("充电桩已关闭，当前被打断的充电详单: {}", detail.get_id());
         send_update(ws_sender, &detail).await;
@@ -461,7 +461,7 @@ async fn handle_open(update_ticker: &mut Option<Interval>, complete_ticker: &mut
 
 /// 尝试更新充电状态
 async fn try_update_charge(ws_sender: &mut WsSender, update_ticker: &mut Option<Interval>) {
-    let mut charge = CHARGE.write().await;
+    let mut charge = CHARGE.lock().await;
     if charge.is_working() {
         charge.update_charging();
         if let Some(detail) = charge.get_charging_detail_ref() {
@@ -483,7 +483,7 @@ async fn try_complete_charge(
     update_ticker: &mut Option<Interval>,
     complete_ticker: &mut Option<Interval>,
 ) {
-    let mut charge = CHARGE.write().await;
+    let mut charge = CHARGE.lock().await;
     if charge.is_working() {
         if let Some(detail) = charge.complete_charging() {
             send_complete(ws_sender, &detail).await;
@@ -516,7 +516,7 @@ async fn try_breakdown_charge(
     complete_ticker: &mut Option<Interval>,
 ) {
     tracing::error!("充电桩损坏");
-    let mut charge = CHARGE.write().await;
+    let mut charge = CHARGE.lock().await;
     if charge.is_working() {
         if let Some(detail) = charge.breakdown() {
             send_fault(ws_sender, Some(&detail)).await;

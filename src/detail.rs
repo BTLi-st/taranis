@@ -20,6 +20,7 @@ enum ChargeStatus {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+/// 充电详单
 pub struct ChargingDetail {
     /// 充电详单ID
     id: u32,

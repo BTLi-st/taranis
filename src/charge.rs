@@ -3,7 +3,7 @@ use crate::detail::ChargingDetail;
 use crate::price::calc_price_with_tz;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize)]
@@ -235,9 +235,9 @@ fn already_charged(
     hours * power // 计算已充电度数
 }
 
-/// 全局充电桩实例，使用 Lazy 和 RwLock 确保线程安全和延迟加载
-pub static CHARGE: Lazy<RwLock<Charge>> = Lazy::new(|| {
-    RwLock::new(Charge::new(
+/// 全局充电桩实例，使用 Lazy 和 Mutex 确保线程安全和延迟初始化
+pub static CHARGE: Lazy<Mutex<Charge>> = Lazy::new(|| {
+    Mutex::new(Charge::new(
         CONF.charge.charge_type,
         CONF.charge.power,
         CONF.charge.size,
