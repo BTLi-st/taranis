@@ -3,3 +3,4 @@ pub mod conf;
 pub mod detail;
 pub mod message;
 pub mod price;
+pub mod time;

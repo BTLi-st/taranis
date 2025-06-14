@@ -1,6 +1,7 @@
 use crate::conf::{CONF, ChargeType};
 use crate::detail::ChargingDetail;
 use crate::price::calc_price_with_tz;
+use crate::time::get_mock_now;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -43,6 +44,7 @@ impl Charge {
     pub fn add_detail(&mut self, detail: ChargingDetail) {
         if detail.get_type() != self.type_ {
             tracing::warn!(
+                virtual_time = %get_mock_now(),
                 "充电详单类型不匹配，无法添加到充电桩队列: {:?} != {:?}",
                 detail.get_type(),
                 self.type_
@@ -58,11 +60,11 @@ impl Charge {
     /// 开始充电
     pub fn start_charging(&mut self) {
         if self.queue.is_empty() {
-            tracing::warn!("充电桩队列为空，无法开始充电");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩队列为空，无法开始充电");
             return;
         }
         if self.working {
-            tracing::warn!("充电桩正在工作，无法再次开始充电");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩正在工作，无法再次开始充电");
             return;
         }
 
@@ -70,9 +72,10 @@ impl Charge {
 
         let detail = self.queue.first_mut().unwrap();
 
-        detail.start(chrono::Utc::now());
+        detail.start(get_mock_now());
 
         tracing::info!(
+            virtual_time = %get_mock_now(),
             "充电桩开始充电 详单 ID: {}",
             detail.get_id(),
         );
@@ -81,16 +84,16 @@ impl Charge {
     /// 更新充电状态
     pub fn update_charging(&mut self) {
         if self.queue.is_empty() {
-            tracing::warn!("充电桩队列为空，无法更新充电状态");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩队列为空，无法更新充电状态");
             return;
         }
         if !self.working {
-            tracing::warn!("充电桩未处于工作状态，无法更新充电状态");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩未处于工作状态，无法更新充电状态");
             return;
         }
 
         let detail = self.queue.first_mut().unwrap();
-        let now = chrono::Utc::now();
+        let now = get_mock_now();
         let cost = calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
         detail.update_state(
             already_charged(self.power, &detail, now.clone()),
@@ -105,15 +108,15 @@ impl Charge {
         // 检查队列是否为空或充电桩是否处于工作状态
         // 如果队列为空或充电桩未工作，返回 None
         if self.queue.is_empty() {
-            tracing::warn!("充电桩队列为空，无法完成充电");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩队列为空，无法完成充电");
             None
         } else if !self.working {
-            tracing::warn!("充电桩未处于工作状态，无法完成充电");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩未处于工作状态，无法完成充电");
             None
         } else {
             let mut detail = self.queue.remove(0);
             self.working = false; // 完成充电时设置充电桩为非工作状态
-            let now = chrono::Utc::now();
+            let now = get_mock_now();
             let cost =
                 calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
             detail.complete(
@@ -130,7 +133,7 @@ impl Charge {
     pub fn cancel_charging(&mut self, detail_id: u32) -> Result<ChargingDetail, String> {
         if let Some(pos) = self.queue.iter().position(|d| d.get_id() == detail_id) {
             let detail = self.queue.get_mut(pos).unwrap();
-            let now = chrono::Utc::now();
+            let now = get_mock_now();
             if pos == 0 {
                 let cost =
                     calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
@@ -151,7 +154,7 @@ impl Charge {
             }
             Ok(self.queue.remove(pos))
         } else {
-            tracing::warn!("未找到指定的充电详单，无法取消充电");
+            tracing::warn!(virtual_time = %get_mock_now(), "未找到指定的充电详单，无法取消充电");
             Err("no such charging detail".to_string())
         }
     }
@@ -165,12 +168,12 @@ impl Charge {
     pub fn close(&mut self) -> Option<ChargingDetail> {
         self.working = false; // 设置充电桩为非工作状态
         if self.queue.is_empty() {
-            tracing::info!("充电桩队列为空，没有被打断的充电详单");
+            tracing::info!(virtual_time = %get_mock_now(), "充电桩队列为空，没有被打断的充电详单");
             None
         } else {
             let mut detail = self.queue.remove(0);
             self.queue.clear(); // 清空队列
-            let now = chrono::Utc::now();
+            let now = get_mock_now();
             let cost =
                 calc_price_with_tz(detail.clone_start_time(), now.clone(), self.power).unwrap();
             detail.interrupt(
@@ -198,13 +201,13 @@ impl Charge {
         self.queue.len()
     }
 
-    /// 获取预计完成间隔
+    /// 获取预计完成间隔(毫秒)
     pub fn complete_interval(&self) -> u64 {
         if self.queue.is_empty() {
-            tracing::warn!("充电桩队列为空，无法获取完成间隔");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩队列为空，无法获取完成间隔");
             0
         } else if !self.working {
-            tracing::warn!("充电桩未处于工作状态，无法获取完成间隔");
+            tracing::warn!(virtual_time = %get_mock_now(), "充电桩未处于工作状态，无法获取完成间隔");
             0
         } else {
             let time = self
@@ -213,11 +216,12 @@ impl Charge {
                 .unwrap()
                 .get_estimated_end_time(self.power);
             if let Some(end_time) = time {
-                let now = chrono::Utc::now();
+                let now = get_mock_now();
                 let duration = end_time.signed_duration_since(now);
-                duration.num_seconds() as u64
+                let millis = duration.num_milliseconds() + 100; // 加100毫秒以避免精度问题
+                millis as u64 / CONF.time.speed // 考虑加速倍数
             } else {
-                tracing::warn!("无法计算预计充电结束时间");
+                tracing::warn!(virtual_time = %get_mock_now(), "无法计算预计充电结束时间");
                 0
             }
         }

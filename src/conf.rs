@@ -2,6 +2,7 @@
 
 use std::sync::LazyLock;
 
+use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 
 use chrono_tz::Tz;
@@ -49,15 +50,9 @@ pub struct ChargeConf {
     #[serde(default = "default_size")]
     /// 队列大小
     pub size: u32,
-    #[serde(default = "default_tz")]
-    /// 时区
-    pub tz: Tz,
     #[serde(default = "disallow_break")]
     /// 是否允许中断充电
     pub allow_break: bool,
-    #[serde(default = "default_update_interval")]
-    /// 更新间隔，单位为秒
-    pub update_interval: u64,
 }
 
 fn default_charge_type() -> ChargeType {
@@ -72,27 +67,17 @@ fn default_size() -> u32 {
     2 // 默认队列大小为2
 }
 
-fn default_tz() -> Tz {
-    "Asia/Shanghai".parse().unwrap() // 默认时区为上海
-}
-
 fn disallow_break() -> bool {
     false // 默认不允许中断充电
-}
-
-fn default_update_interval() -> u64 {
-    5 // 默认更新间隔为5秒
 }
 
 impl Default for ChargeConf {
     fn default() -> Self {
         ChargeConf {
             charge_type: default_charge_type(), // 默认充电类型为快速充电
-            power: default_power(), // 默认功率为30kW
-            size: default_size(), // 默认队列大小为2
-            tz: default_tz(),     // 默认时区为上海
-            allow_break: false,   // 默认允许中断充电
-            update_interval: default_update_interval(), // 默认更新间隔为5秒
+            power: default_power(),             // 默认功率为30kW
+            size: default_size(),               // 默认队列大小为2
+            allow_break: false,                 // 默认允许中断充电
         }
     }
 }
@@ -117,6 +102,45 @@ impl Default for WebSocketConf {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TimeConf {
+    #[serde(default = "default_update_interval")]
+    /// 更新间隔，单位为毫秒
+    pub update_interval: u64,
+    #[serde(default = "default_tz")]
+    /// 时区
+    pub tz: Tz,
+    #[serde(default = "default_speed")]
+    /// 加速倍数
+    pub speed: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// 开始时间
+    pub start_time: Option<DateTime<chrono::Utc>>,
+}
+
+fn default_update_interval() -> u64 {
+    5000 // 默认更新间隔为5000毫秒（5秒）
+}
+
+fn default_tz() -> Tz {
+    "Asia/Shanghai".parse().unwrap() // 默认时区为上海
+}
+
+fn default_speed() -> u64 {
+    1 // 默认加速倍数为1
+}
+
+impl Default for TimeConf {
+    fn default() -> Self {
+        TimeConf {
+            update_interval: default_update_interval(),
+            tz: default_tz(),
+            speed: default_speed(),
+            start_time: None, // 默认没有开始时间（开始时间为系统当前时间）
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 /// 全局配置
 pub struct Conf {
@@ -129,6 +153,9 @@ pub struct Conf {
     #[serde(rename = "websocket", default = "WebSocketConf::default")]
     /// WebSocket配置
     pub websocket: WebSocketConf,
+    #[serde(rename = "time", default = "TimeConf::default")]
+    /// 时间配置
+    pub time: TimeConf,
 }
 
 /// 静态配置实例，使用 LazyLock 确保在第一次访问时加载配置文件

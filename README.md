@@ -14,12 +14,16 @@ path = "prices.json" # 价格文件路径
 charge_type = "F" # 充电类型，F: 快充, T: 慢充
 power = 30.0 # 充电功率，单位为 kW
 size = 2 # 充电桩队列长度
-tz = "Asia/Shanghai" # 时区
 allow_break = false # 是否允许中断充电（是否允许模拟充电桩损坏）
-update_interval = 5 # 充电状态更新间隔，单位为秒
 
 [websocket]
 url = "ws://localhost:8080/ws" # WebSocket 服务器地址
+
+[time]
+update_interval = 5000 # 时间更新间隔，单位为毫秒（更新时间不受加速影响）
+tz = "Asia/Shanghai" # 时区设置
+speed = 1 # 时间加速倍数
+# 还有一个可选项 `start_time`，如果不设置则默认从当前时间开始模拟充电桩时间，设置格式为 UTC 格式
 ```
 
 如果想要修改配置文件，可以在运行目录下创建 `config.toml` 文件，只需要写入需要修改的部分即可，程序会自动合并默认配置和用户配置。

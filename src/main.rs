@@ -1,6 +1,7 @@
 use futures_util::SinkExt;
 use futures_util::StreamExt;
 use futures_util::stream::SplitSink;
+use taranis::time::get_mock_now;
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
 use tokio::time::Interval;
@@ -128,20 +129,20 @@ async fn work() {
                                 handle(text.to_string(), &mut ws_sender, &mut update_tiker, &mut complete_tiker).await;
                             }
                             WsMessage::Close(_) => {
-                                tracing::info!("WebSocket 连接已关闭");
+                                tracing::info!(virtual_time = %get_mock_now(), "WebSocket 连接已关闭");
                                 break;
                             }
                             _ => {
-                                tracing::warn!("接收到非文本消息: {:?}，自动忽略", message);
+                                tracing::warn!(virtual_time = %get_mock_now(), "接收到非文本消息: {:?}，自动忽略", message);
                             }
                         }
                     }
                     Some(Err(e)) => {
-                        tracing::error!("WebSocket 接收消息失败: {}", e);
+                        tracing::error!(virtual_time = %get_mock_now(), "WebSocket 接收消息失败: {}", e);
                         break;
                     }
                     None => {
-                        tracing::info!("WebSocket 连接已关闭");
+                        tracing::info!(virtual_time = %get_mock_now(), "WebSocket 连接已关闭");
                         break;
                     }
                 }
@@ -155,20 +156,20 @@ async fn work() {
             _break = &mut breakdown_rx => {
                 match _break {
                     Ok(_) => {
-                        tracing::info!("接收到充电桩损坏信号");
+                        tracing::info!(virtual_time = %get_mock_now(), "接收到充电桩损坏信号");
                         try_breakdown_charge(&mut ws_sender, &mut update_tiker, &mut complete_tiker).await;
                         ws_sender.close().await.ok();
                         break;
                     }
                     Err(_) => {
-                        tracing::warn!("充电桩损坏信号已被取消");
+                        tracing::warn!(virtual_time = %get_mock_now(), "充电桩损坏信号已被取消");
                         break;
                     }
                 }
             }
         }
     }
-    tracing::info!("充电桩服务已停止");
+    tracing::info!(virtual_time = %get_mock_now(), "充电桩服务已停止");
     IS_CLOSED.store(true, std::sync::atomic::Ordering::Release);
 }
 
@@ -185,14 +186,14 @@ async fn wait_opt_ticker(ticker: &mut Option<Interval>) {
 fn set_ticker(ticker: &mut Option<Interval>, duration: Duration) {
     if duration.is_zero() {
         tracing::warn!(
-            "设置的计时器时长为零，将使用 tokio::time::interval (可能立即触发): {:?}",
+            virtual_time = %get_mock_now(), "设置的计时器时长为零，将使用 tokio::time::interval (可能立即触发): {:?}",
             duration
         );
         // 对于零时长，如果期望立即触发，原始的 interval() 行为是符合的
         *ticker = Some(interval(duration));
     } else {
         // 计算第一个 tick 应该发生的时间
-        tracing::debug!("设置计时器，间隔: {:?}", duration);
+        tracing::debug!(virtual_time = %get_mock_now(), "设置计时器，间隔: {:?}", duration);
         let first_tick_time = tokio::time::Instant::now() + duration;
         *ticker = Some(interval_at(first_tick_time, duration));
     }
@@ -235,8 +236,8 @@ async fn register(ws_sender: &mut WsSender) {
         ))
         .await
     {
-        Ok(_) => tracing::info!("充电桩注册消息发送成功"),
-        Err(e) => tracing::error!("充电桩注册消息发送失败: {}", e),
+        Ok(_) => tracing::info!(virtual_time = %get_mock_now(), "充电桩注册消息发送成功"),
+        Err(e) => tracing::error!(virtual_time = %get_mock_now(), "充电桩注册消息发送失败: {}", e),
     }
 }
 
@@ -249,11 +250,11 @@ async fn handle(
 ) {
     static IS_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-    tracing::debug!("接收到消息: {}", message);
+    tracing::debug!(virtual_time = %get_mock_now(), "接收到消息: {}", message);
     let msg: MSG = match serde_json::from_str(&message) {
         Ok(m) => m,
         Err(e) => {
-            tracing::error!("消息解析失败: {}", e);
+            tracing::error!(virtual_time = %get_mock_now(), "消息解析失败: {}", e);
             return;
         }
     };
@@ -261,21 +262,21 @@ async fn handle(
     match msg.type_ {
         MessageType::New => {
             if IS_CLOSED.load(std::sync::atomic::Ordering::SeqCst) {
-                tracing::warn!("充电桩已关闭，无法处理新充电请求");
+                tracing::warn!(virtual_time = %get_mock_now(), "充电桩已关闭，无法处理新充电请求");
                 return;
             }
             handle_new(msg.data, ws_sender, update_ticker, complete_ticker).await;
         }
         MessageType::Cancel => {
             if IS_CLOSED.load(std::sync::atomic::Ordering::SeqCst) {
-                tracing::warn!("充电桩已关闭，无法取消充电");
+                tracing::warn!(virtual_time = %get_mock_now(), "充电桩已关闭，无法取消充电");
                 return;
             }
             handle_cancel(msg.data, ws_sender, update_ticker, complete_ticker).await
         }
         MessageType::Close => {
             if IS_CLOSED.load(std::sync::atomic::Ordering::SeqCst) {
-                tracing::warn!("充电桩已关闭，无法再次关闭");
+                tracing::warn!(virtual_time = %get_mock_now(), "充电桩已关闭，无法再次关闭");
                 return;
             }
             handle_close(ws_sender, update_ticker, complete_ticker).await;
@@ -283,14 +284,14 @@ async fn handle(
         }
         MessageType::Open => {
             if !IS_CLOSED.load(std::sync::atomic::Ordering::SeqCst) {
-                tracing::warn!("充电桩未关闭，无法重新打开");
+                tracing::warn!(virtual_time = %get_mock_now(), "充电桩未关闭，无法重新打开");
                 return;
             }
             handle_open(update_ticker, complete_ticker).await;
             IS_CLOSED.store(false, std::sync::atomic::Ordering::SeqCst);
         }
         _ => {
-            tracing::warn!("非法消息类型: {:?}", msg.type_);
+            tracing::warn!(virtual_time = %get_mock_now(), "非法消息类型: {:?}", msg.type_);
         }
     }
 }
@@ -298,12 +299,12 @@ async fn handle(
 /// 检查充电桩是否未工作，如果未工作且队列中有充电详单，则开始工作并设置计时器。
 async fn not_working_check(charge: &mut Charge, complete_ticker: &mut Option<Interval>) -> bool {
     if !charge.is_working() && charge.get_queue_size() > 0 {
-        tracing::info!("充电桩未工作，开始工作");
+        tracing::info!(virtual_time = %get_mock_now(), "充电桩未工作，开始工作");
         charge.start_charging();
         // println!("{:?}", Duration::from_secs(charge.complete_interval()));
         set_ticker(
             complete_ticker,
-            Duration::from_secs(charge.complete_interval() + 1), // +1秒是为了避免精确到秒的误差
+            Duration::from_millis(charge.complete_interval()),
         );
         true
     } else {
@@ -323,8 +324,12 @@ async fn send_update(ws_sender: &mut WsSender, detail: &ChargingDetail) {
         ))
         .await
     {
-        Ok(_) => tracing::debug!("充电详单更新消息发送成功: {}", detail.get_id()),
-        Err(e) => tracing::error!("充电详单更新消息发送失败: {}", e),
+        Ok(_) => {
+            tracing::debug!(virtual_time = %get_mock_now(), "充电详单更新消息发送成功: {}", detail.get_id())
+        }
+        Err(e) => {
+            tracing::error!(virtual_time = %get_mock_now(), "充电详单更新消息发送失败: {}", e)
+        }
     }
 }
 
@@ -340,8 +345,10 @@ async fn send_complete(ws_sender: &mut WsSender, detail: &ChargingDetail) {
         ))
         .await
     {
-        Ok(_) => tracing::info!("充电详单完成消息发送成功"),
-        Err(e) => tracing::error!("充电详单完成消息发送失败: {}", e),
+        Ok(_) => tracing::info!(virtual_time = %get_mock_now(), "充电详单完成消息发送成功"),
+        Err(e) => {
+            tracing::error!(virtual_time = %get_mock_now(), "充电详单完成消息发送失败: {}", e)
+        }
     }
 }
 
@@ -357,8 +364,10 @@ async fn send_fault(ws_sender: &mut WsSender, detail: Option<&ChargingDetail>) {
         ))
         .await
     {
-        Ok(_) => tracing::info!("充电详单故障消息发送成功"),
-        Err(e) => tracing::error!("充电详单故障消息发送失败: {}", e),
+        Ok(_) => tracing::info!(virtual_time = %get_mock_now(), "充电详单故障消息发送成功"),
+        Err(e) => {
+            tracing::error!(virtual_time = %get_mock_now(), "充电详单故障消息发送失败: {}", e)
+        }
     }
 }
 
@@ -372,27 +381,27 @@ async fn handle_new(
     let detail: ChargingDetail = match serde_json::from_str(&msg) {
         Ok(d) => d,
         Err(e) => {
-            tracing::error!("充电详单解析失败: {}", e);
+            tracing::error!(virtual_time = %get_mock_now(), "充电详单解析失败: {}", e);
             return;
         }
     };
-    tracing::info!("接收到新的充电详单: {}", detail.get_id());
+    tracing::info!(virtual_time = %get_mock_now(), "接收到新的充电详单: {}", detail.get_id());
 
     if !detail.is_ready() {
-        tracing::warn!("充电详单格式异常，无法加入队列");
+        tracing::warn!(virtual_time = %get_mock_now(), "充电详单格式异常，无法加入队列");
         return;
     } else {
         let mut charge = CHARGE.lock().await;
         charge.add_detail(detail);
         tracing::info!(
-            "充电详单已加入队列，当前队列长度: {}",
+            virtual_time = %get_mock_now(), "充电详单已加入队列，当前队列长度: {}",
             charge.get_queue_size()
         );
         if not_working_check(&mut charge, complete_ticker).await {
             send_update(ws_sender, charge.get_charging_detail_ref().unwrap()).await;
             set_ticker(
                 update_ticker,
-                Duration::from_secs(CONF.charge.update_interval),
+                Duration::from_millis(CONF.time.update_interval),
             );
         }
     }
@@ -408,28 +417,28 @@ async fn handle_cancel(
     let detail: ChargingDetail = match serde_json::from_str(&msg) {
         Ok(d) => d,
         Err(e) => {
-            tracing::error!("充电详单解析失败: {}", e);
+            tracing::error!(virtual_time = %get_mock_now(), "充电详单解析失败: {}", e);
             return;
         }
     };
     let detail_id = detail.get_id();
-    tracing::info!("接收到取消充电详单请求: {}", detail_id);
+    tracing::info!(virtual_time = %get_mock_now(), "接收到取消充电详单请求: {}", detail_id);
 
     let mut charge = CHARGE.lock().await;
     match charge.cancel_charging(detail_id) {
         Ok(detail) => {
-            tracing::info!("充电详单 {} 已取消", detail_id);
+            tracing::info!(virtual_time = %get_mock_now(), "充电详单 {} 已取消", detail_id);
             send_update(ws_sender, &detail).await;
             if not_working_check(&mut charge, complete_ticker).await {
                 send_update(ws_sender, charge.get_charging_detail_ref().unwrap()).await;
                 set_ticker(
                     update_ticker,
-                    Duration::from_secs(CONF.charge.update_interval),
+                    Duration::from_millis(CONF.time.update_interval),
                 );
             }
         }
         Err(e) => {
-            tracing::error!("取消充电详单失败: {}", e);
+            tracing::error!(virtual_time = %get_mock_now(), "取消充电详单失败: {}", e);
         }
     }
 }
@@ -440,13 +449,13 @@ async fn handle_close(
     update_ticker: &mut Option<Interval>,
     complete_ticker: &mut Option<Interval>,
 ) {
-    tracing::info!("接收到关闭充电桩请求");
+    tracing::info!(virtual_time = %get_mock_now(), "接收到关闭充电桩请求");
     let mut charge = CHARGE.lock().await;
     if let Some(detail) = charge.close() {
-        tracing::info!("充电桩已关闭，当前被打断的充电详单: {}", detail.get_id());
+        tracing::info!(virtual_time = %get_mock_now(), "充电桩已关闭，当前被打断的充电详单: {}", detail.get_id());
         send_update(ws_sender, &detail).await;
     } else {
-        tracing::info!("充电桩队列为空，没有被打断的充电详单");
+        tracing::info!(virtual_time = %get_mock_now(), "充电桩队列为空，没有被打断的充电详单");
     }
     remove_ticker(update_ticker);
     remove_ticker(complete_ticker);
@@ -454,7 +463,7 @@ async fn handle_close(
 
 /// 处理打开充电桩请求
 async fn handle_open(update_ticker: &mut Option<Interval>, complete_ticker: &mut Option<Interval>) {
-    tracing::info!("接收到打开充电桩请求");
+    tracing::info!(virtual_time = %get_mock_now(), "接收到打开充电桩请求");
     remove_ticker(update_ticker);
     remove_ticker(complete_ticker);
 }
@@ -472,7 +481,7 @@ async fn try_update_charge(ws_sender: &mut WsSender, update_ticker: &mut Option<
             );
         }
     } else {
-        tracing::error!("充电桩未处于工作状态，无法更新充电状态");
+        tracing::error!(virtual_time = %get_mock_now(), "充电桩未处于工作状态，无法更新充电状态");
         remove_ticker(update_ticker);
     }
 }
@@ -489,12 +498,12 @@ async fn try_complete_charge(
             send_complete(ws_sender, &detail).await;
             remove_ticker(complete_ticker);
             remove_ticker(update_ticker);
-            tracing::info!("充电详单 {} 已完成", detail.get_id());
+            tracing::info!(virtual_time = %get_mock_now(), "充电详单 {} 已完成", detail.get_id());
             if not_working_check(&mut charge, complete_ticker).await {
                 send_update(ws_sender, charge.get_charging_detail_ref().unwrap()).await;
                 set_ticker(
                     update_ticker,
-                    Duration::from_secs(CONF.charge.update_interval),
+                    Duration::from_millis(CONF.time.update_interval),
                 );
             }
         } else {
@@ -503,7 +512,7 @@ async fn try_complete_charge(
             );
         }
     } else {
-        tracing::error!("充电桩未处于工作状态，无法完成充电");
+        tracing::error!(virtual_time = %get_mock_now(), "充电桩未处于工作状态，无法完成充电");
         remove_ticker(complete_ticker);
         remove_ticker(update_ticker);
     }
@@ -515,21 +524,21 @@ async fn try_breakdown_charge(
     update_ticker: &mut Option<Interval>,
     complete_ticker: &mut Option<Interval>,
 ) {
-    tracing::error!("充电桩损坏");
+    tracing::error!(virtual_time = %get_mock_now(),"充电桩损坏");
     let mut charge = CHARGE.lock().await;
     if charge.is_working() {
         if let Some(detail) = charge.breakdown() {
             send_fault(ws_sender, Some(&detail)).await;
             remove_ticker(complete_ticker);
             remove_ticker(update_ticker);
-            tracing::info!("充电详单 {} 已被打断", detail.get_id());
+            tracing::info!(virtual_time = %get_mock_now(), "充电详单 {} 已被打断", detail.get_id());
         } else {
             unreachable!(
                 "It should never happen that there is no charging detail when the charge is working"
             );
         }
     } else {
-        tracing::info!("充电桩未处于工作状态，没有被打断的充电详单");
+        tracing::info!(virtual_time = %get_mock_now(), "充电桩未处于工作状态，没有被打断的充电详单");
         send_fault(ws_sender, None).await;
         remove_ticker(complete_ticker);
         remove_ticker(update_ticker);

@@ -389,8 +389,8 @@ pub fn calc_price_with_tz(
     end: DateTime<Utc>,
     power: f64,
 ) -> Result<(f64, f64), String> {
-    let start_naive = start.with_timezone(&CONF.charge.tz);
-    let end_naive = end.with_timezone(&CONF.charge.tz);
+    let start_naive = start.with_timezone(&CONF.time.tz);
+    let end_naive = end.with_timezone(&CONF.time.tz);
     calc_price(start_naive.naive_local(), end_naive.naive_local(), power)
 }
 
