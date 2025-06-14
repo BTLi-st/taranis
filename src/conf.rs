@@ -161,7 +161,7 @@ pub struct Conf {
 /// 静态配置实例，使用 LazyLock 确保在第一次访问时加载配置文件
 pub static CONF: LazyLock<Conf> = LazyLock::new(|| {
     let path = "config.toml";
-    if let Ok(content) = std::fs::read_to_string(path) {
+    let conf = if let Ok(content) = std::fs::read_to_string(path) {
         tracing::info!("加载配置文件: {}", path);
         toml::from_str(&content).unwrap_or_else(|_| {
             tracing::warn!("配置文件解析失败，使用默认配置");
@@ -170,7 +170,30 @@ pub static CONF: LazyLock<Conf> = LazyLock::new(|| {
     } else {
         tracing::debug!("配置文件不存在: {}，使用默认配置", path);
         Conf::default()
+    };
+    tracing::debug!("配置文件内容: {:?}", conf);
+    tracing::info!("充电桩类型: {:?}", conf.charge.charge_type);
+    tracing::info!("充电功率: {} kW", conf.charge.power);
+    if conf.time.start_time.is_some() {
+        tracing::info!("配置文件中指定了开始时间: {:?}", conf.time.start_time);
+    } else {
+        tracing::info!("配置文件中未指定开始时间，使用当前系统时间");
     }
+    if conf.time.update_interval < 100 {
+        tracing::warn!(
+            "时间更新间隔过短: {} 毫秒，可能会导致性能问题",
+            conf.time.update_interval
+        );
+    }
+    if conf.time.speed == 0 {
+        tracing::error!("时间加速比为 0，可能会导致严重的运行问题");
+    } else if conf.time.speed > 1 {
+        tracing::warn!(
+            "时间加速比为 {}，过高的加速可能会导致不准确的时间计算",
+            conf.time.speed
+        );
+    }
+    conf
 });
 
 #[cfg(test)]
