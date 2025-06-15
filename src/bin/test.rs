@@ -4,7 +4,7 @@ use taranis::{
     detail::ChargingDetail,
     message::{MSG, MessageType},
 };
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, time::sleep};
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::main]
@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .expect(format!("Failed to parse message: {:?}", message).as_str());
                             if msg.type_ == MessageType::Register {
                                 println!("Register message received: {:?}", msg);
+                                sleep(std::time::Duration::from_secs(5)).await;
                                 // Here you can handle the register message as needed
                                 // For example, you might want to send a response back
                                 for _ in 0..CONF.charge.size {

@@ -235,8 +235,8 @@ async fn register(ws_sender: &mut WsSender) {
         ))
         .await
     {
-        Ok(_) => tracing::info!(virtual_time = %get_mock_now(), "充电桩注册消息发送成功"),
-        Err(e) => tracing::error!(virtual_time = %get_mock_now(), "充电桩注册消息发送失败: {}", e),
+        Ok(_) => tracing::info!("充电桩注册消息发送成功"),
+        Err(e) => tracing::error!("充电桩注册消息发送失败: {}", e),
     }
 }
 

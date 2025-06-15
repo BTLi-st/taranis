@@ -52,7 +52,7 @@ impl ChargingDetail {
     pub fn test_new(id: u32) -> Self {
         ChargingDetail {
             id: id,
-            request_amount: 1.0,
+            request_amount: 30.0,
             type_: CONF.charge.charge_type,
             already_charged: 0.0,
             start_time: None,
